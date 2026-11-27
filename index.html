@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Iron Meridian — a real-time strategy game for phones, tablets and PCs.">
+  <title>Iron Meridian</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- ============ GAME ============ -->
+    <div id="game" hidden>
+      <div id="viewport">
+        <canvas id="view"></canvas>
+        <div id="hud-top">
+          <div id="clock">0:00</div>
+          <div id="fps"></div>
+          <div id="sw-timers"></div>
+        </div>
+        <div id="messages"></div>
+        <div id="mode-hint" hidden></div>
+        <div id="place-confirm" hidden>
+          <button id="place-ok" aria-label="Confirm placement">✓</button>
+          <button id="place-cancel" aria-label="Cancel placement">✕</button>
+        </div>
+        <div id="zoom-ctl">
+          <button id="zoom-in" aria-label="Zoom in">+</button>
+          <button id="zoom-out" aria-label="Zoom out">−</button>
+        </div>
+        <div id="cmdbar">
+          <div class="cmd-row">
+            <button data-cmd="box" title="Box-select mode (touch)">▢<small>Box</small></button>
+            <button data-cmd="army" title="Select all combat units (Q)">⚑<small>Army</small></button>
+            <button data-cmd="same" class="needs-units" title="Select same type on screen (E)">≡<small>Same</small></button>
+            <button data-cmd="attackmove" class="needs-units" title="Attack-move (A)">⚔<small>A-Move</small></button>
+            <button data-cmd="stop" class="needs-units" title="Stop (S)">■<small>Stop</small></button>
+            <button data-cmd="guard" class="needs-units" title="Guard position (G)">⛨<small>Guard</small></button>
+            <button data-cmd="scatter" class="needs-units" title="Scatter (X)">✷<small>Scatter</small></button>
+            <button data-cmd="deploy" class="needs-sel" title="Deploy / pack up (D)">⤓<small>Deploy</small></button>
+            <button data-cmd="deselect" class="needs-sel" title="Deselect (Right-click / Esc)">✕<small>Clear</small></button>
+            <button data-cmd="base" title="Jump to base (H)">⌂<small>Base</small></button>
+          </div>
+          <div id="groups" class="cmd-row"></div>
+        </div>
+      </div>
+      <aside id="sidebar">
+        <div id="sb-head">
+          <div id="credits">$0</div>
+          <div id="power-wrap">
+            <div id="power"><div id="power-fill"></div><div id="power-use"></div></div>
+            <span id="power-txt">+0</span>
+          </div>
+        </div>
+        <canvas id="minimap" width="200" height="200"></canvas>
+        <div id="sb-tools">
+          <button id="btn-repair" title="Repair mode (R)">🔧</button>
+          <button id="btn-sell" title="Sell mode (Z)">$</button>
+          <button id="btn-sw" hidden title="Superweapon"><span>--</span><i></i></button>
+          <button id="btn-menu" title="Menu (Esc)">☰</button>
+        </div>
+        <div id="sb-tabs"></div>
+        <div id="build-grid"></div>
+        <div id="sel-info" hidden></div>
+      </aside>
+      <div id="tooltip"></div>
+    </div>
+
+    <!-- ============ MENUS ============ -->
+    <div id="menu">
+      <div class="menu-bg"></div>
+      <section id="scr-main" class="screen active">
+        <h1 class="title">IRON<span>MERIDIAN</span></h1>
+        <p class="tag">Real-time strategy · Phone · Tablet · PC</p>
+        <div class="menu-btns">
+          <button data-go="skirmish" class="primary">Skirmish</button>
+          <button id="btn-continue" hidden>Continue Saved Game</button>
+          <button data-go="help">How to Play</button>
+          <button data-go="intel">Field Manual</button>
+          <button data-go="settings">Settings</button>
+          <button id="btn-install" hidden>Install App</button>
+        </div>
+        <p class="foot">An original game. Works offline once loaded.</p>
+      </section>
+
+      <section id="scr-skirmish" class="screen">
+        <h2>Skirmish Setup</h2>
+        <div class="setup">
+          <div class="setup-col">
+            <h3>Commanders</h3>
+            <div id="slots"></div>
+            <button id="add-ai" class="small">+ Add AI opponent</button>
+          </div>
+          <div class="setup-col">
+            <h3>Battlefield</h3>
+            <label>Map size <select id="opt-size"><option value="64">Small (64×64)</option><option value="96" selected>Medium (96×96)</option><option value="128">Large (128×128)</option></select></label>
+            <label>Map seed <span class="row"><input id="opt-seed" type="number" min="1" max="999999"><button id="reseed" class="small" type="button">🎲</button></span></label>
+            <label>Starting credits <select id="opt-credits"><option value="5000">$5,000</option><option value="10000" selected>$10,000</option><option value="20000">$20,000</option><option value="50000">$50,000</option></select></label>
+            <label>Starting forces <select id="opt-start"><option value="crawler">Base Crawler only</option><option value="army">Crawler + squad</option></select></label>
+            <label>Game speed <select id="opt-speed"><option value="0.75">Slow</option><option value="1" selected>Normal</option><option value="1.35">Fast</option><option value="1.75">Fastest</option></select></label>
+            <label class="chk"><input id="opt-fog" type="checkbox" checked> Fog of war &amp; shroud</label>
+            <label class="chk"><input id="opt-sw" type="checkbox" checked> Superweapons</label>
+            <label class="chk"><input id="opt-crates" type="checkbox" checked> Bonus crates</label>
+            <canvas id="map-preview" width="160" height="160"></canvas>
+          </div>
+        </div>
+        <div class="menu-btns row">
+          <button data-go="main">Back</button>
+          <button id="btn-start" class="primary">Start Battle</button>
+        </div>
+      </section>
+
+      <section id="scr-settings" class="screen">
+        <h2>Settings</h2>
+        <div class="settings">
+          <label>Effects volume <input id="set-sfx" type="range" min="0" max="1" step="0.05"></label>
+          <label>Music volume <input id="set-music" type="range" min="0" max="1" step="0.05"></label>
+          <label class="chk"><input id="set-voice" type="checkbox"> Announcer voice</label>
+          <label class="chk"><input id="set-unitvoices" type="checkbox"> Unit responses</label>
+          <label class="chk"><input id="set-edge" type="checkbox"> Edge scrolling (mouse)</label>
+          <label>Scroll speed <input id="set-scroll" type="range" min="0.4" max="2.5" step="0.1"></label>
+          <label>Mouse controls <select id="set-mouse"><option value="classic">Classic — left click selects &amp; commands, right click deselects / right-drag scrolls</option><option value="modern">Modern — left click selects, right click commands</option></select></label>
+          <label>Interface size <select id="set-ui"><option value="0.85">Compact</option><option value="1">Standard</option><option value="1.15">Large</option><option value="1.3">Extra large</option></select></label>
+          <label class="chk"><input id="set-fps" type="checkbox"> Show FPS</label>
+        </div>
+        <div class="menu-btns row"><button id="settings-back">Back</button></div>
+      </section>
+
+      <section id="scr-help" class="screen">
+        <h2>How to Play</h2>
+        <div class="help">
+          <div>
+            <h3>Goal</h3>
+            <p>Destroy every enemy structure and unit. Deploy your <b>Base Crawler</b> into a <b>Command Yard</b>, then expand: Power Plants keep your base running, Refineries and Harvesters turn crystal fields into credits, Barracks and War Factories build your army.</p>
+            <h3>Economy &amp; power</h3>
+            <p>Amber crystal is worth $1 per unit, azure crystal $2. Crystal spires regrow nearby fields. Capture neutral <b>Drill Rigs</b> with an Engineer for steady income. If power use exceeds supply, production slows, the tactical map shuts off and powered defenses go offline.</p>
+            <h3>Veterancy</h3>
+            <p>Units gain experience by destroying enemies — Veteran (★) units hit harder and take less damage; Elite (★★) units also repair themselves.</p>
+          </div>
+          <div>
+            <h3>Touch controls</h3>
+            <ul>
+              <li><b>Tap</b> a unit to select it; tap the ground to move; tap an enemy to attack.</li>
+              <li><b>Drag</b> with one finger to scroll; <b>pinch</b> to zoom.</li>
+              <li><b>Long-press then drag</b> (or turn on <b>Box</b>) to select a group.</li>
+              <li><b>Double-tap</b> a unit to select all of that type on screen.</li>
+              <li>Hold a <b>group button</b> (1–5) to assign; tap to recall.</li>
+              <li>Hold a build icon to pause / cancel it.</li>
+            </ul>
+            <h3>Mouse &amp; keyboard</h3>
+            <ul>
+              <li>Left-click select / command, drag to box-select, right-click to deselect, right-drag or edge to scroll, wheel to zoom.</li>
+              <li><kbd>Ctrl</kbd>+<kbd>1-9</kbd> assign group, <kbd>1-9</kbd> recall (twice to center).</li>
+              <li><kbd>A</kbd> attack-move · <kbd>S</kbd> stop · <kbd>G</kbd> guard · <kbd>D</kbd> deploy · <kbd>X</kbd> scatter</li>
+              <li><kbd>Q</kbd> select army · <kbd>E</kbd> same type · <kbd>H</kbd> base · <kbd>Space</kbd> last alert</li>
+              <li><kbd>R</kbd> repair mode · <kbd>Z</kbd> sell mode · <kbd>Tab</kbd> next build tab · <kbd>Esc</kbd> cancel / menu · <kbd>P</kbd> pause</li>
+              <li>Shift-click a unit icon to queue 5. Right-click an icon to hold, again to cancel.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="menu-btns row"><button id="help-back">Back</button></div>
+      </section>
+
+      <section id="scr-intel" class="screen">
+        <h2>Field Manual</h2>
+        <div id="intel" class="intel"></div>
+        <div class="menu-btns row"><button data-go="main">Back</button></div>
+      </section>
+
+      <section id="scr-pause" class="screen">
+        <h2>Paused</h2>
+        <div class="menu-btns">
+          <button id="p-resume" class="primary">Resume</button>
+          <button id="p-save">Save Game</button>
+          <button id="p-load">Load Saved Game</button>
+          <button id="p-settings">Settings</button>
+          <button id="p-help">How to Play</button>
+          <button id="p-restart">Restart</button>
+          <button id="p-surrender">Surrender</button>
+          <button id="p-quit">Quit to Main Menu</button>
+        </div>
+      </section>
+
+      <section id="scr-end" class="screen">
+        <h2 id="end-title">Victory</h2>
+        <p id="end-sub"></p>
+        <table id="end-stats"></table>
+        <div class="menu-btns row">
+          <button id="e-again" class="primary">Play Again</button>
+          <button id="e-menu">Main Menu</button>
+        </div>
+      </section>
+    </div>
+    <div id="rotate-hint">Rotate your device to landscape for the best experience</div>
+  </div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
