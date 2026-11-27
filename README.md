@@ -6,6 +6,8 @@ All names, factions, units, art (drawn in code), music (procedurally generated) 
 
 ## Play
 
+**Play online:** https://avitawill.github.io/red-alert2-remastered/ (on a phone, use *Add to Home Screen* for fullscreen, offline play).
+
 Serve the folder with any static web server and open `index.html`, for example:
 
 ```sh
