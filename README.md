@@ -28,6 +28,7 @@ On a phone, open the page and use **Add to Home Screen** / **Install App** for f
 - **AI opponents.** Easy / Normal / Hard / Brutal. The AI builds to a plan, manages power, harvests, places defenses, captures rigs, repairs, defends its base, attacks in growing waves and fires superweapons.
 - **Skirmish setup.** 1–3 AI players, teams, faction and color per player, map size (64/96/128), seeded procedural maps with preview, starting credits and forces, game speed, and toggles for fog, superweapons and crates.
 - **Save / load, pause, surrender, restart,** and an end-of-battle statistics table.
+- **2.5D view** (toggle in Settings): structures rise from their foundations with lit front walls and cast shadows, rocky plateaus with cliff faces, standing trees, hill-shaded terrain and deeper water, raised vehicles with elevated turrets, and airborne projectiles. Units are depth-sorted so they pass behind tall buildings.
 - **Audio.** Synthesized weapon and UI sounds, a generative soundtrack, spoken announcer alerts and optional unit responses.
 
 ## Controls

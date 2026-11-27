@@ -61,16 +61,20 @@ export class Controller {
     let best = null, bd = 1e9;
     for (const u of w.unitsInRect(wx - 24, wy - 24, wx + 24, wy + 24)) {
       if (!w.isAlly(u.owner, me) && !w.visibleTo(me, u.x, u.y)) continue;
-      const d = dist(wx, wy, u.x, u.y);
+      const d = dist(wx, wy, u.x, u.y - this.r.unitLift(u.type));
       const rr = unitRadius(u.type) + pad + (UNITS[u.type].cat === 'infantry' ? 3 : 0);
       if (d < rr && d < bd) { bd = d; best = u; }
     }
     if (best) return best;
-    const tx = tileOf(wx), ty = tileOf(wy);
-    if (!w.map.inb(tx, ty)) return null;
-    const b = w.get(w.map.bld[w.map.idx(tx, ty)]);
-    if (b && (w.isAlly(b.owner, me) || (b.seen & (1 << me)))) return b;
-    return null;
+    // Structures: hit-test the raised block (roof + front wall), front-most first.
+    let pick = null, pk = -1;
+    for (const b of w.buildings) {
+      if (b.dead || !(w.isAlly(b.owner, me) || (b.seen & (1 << me)))) continue;
+      const H = this.r.bHeight(b.type) * Math.min(1, b.built);
+      const x0 = b.tx * TILE, x1 = (b.tx + b.w) * TILE, y0 = b.ty * TILE - H, y1 = (b.ty + b.h) * TILE;
+      if (wx >= x0 && wx < x1 && wy >= y0 && wy < y1 && y1 > pk) { pk = y1; pick = b; }
+    }
+    return pick;
   }
 
   // ---------- Commands ----------

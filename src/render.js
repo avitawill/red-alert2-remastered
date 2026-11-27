@@ -1,7 +1,7 @@
 // Canvas renderer: terrain, entities, effects, fog, overlays, minimap.
 import { TILE, UNITS, BUILDINGS, RANKS, unitRadius } from './config.js';
 import { T } from './map.js';
-import { drawInfantry, drawVehicle, drawBuilding, drawCrate } from './sprites.js';
+import { drawInfantry, drawVehicle, drawBuilding, drawCrate, drawFacade, BUILDING_HEIGHT } from './sprites.js';
 import { clamp, lerp, shade, RNG } from './util.js';
 
 const CHUNK = 16;
@@ -41,7 +41,33 @@ export class Renderer {
     this.time = 0;
     this.mapVersion = world.map.version;
     this.miniBase = null;
+    this.view3d = true;
+    this.buildHillshade();
     this.resize();
+  }
+
+  setView3d(on) { this.view3d = !!on; this.chunks.clear(); }
+  bHeight(type) { return this.view3d ? BUILDING_HEIGHT[type] || 0 : 0; }
+  unitLift(type) { return this.view3d ? (UNITS[type].cat === 'infantry' ? 1.5 : 4) : 0; }
+
+  // Purely visual rolling terrain: smooth height field -> per-tile light/shade.
+  buildHillshade() {
+    const m = this.world.map, W = m.w, H = m.h;
+    const rng = new RNG((this.world.setup.seed * 31 + 7) >>> 0);
+    const S = 7, gw = Math.ceil(W / S) + 2, gh = Math.ceil(H / S) + 2;
+    const g = new Float32Array(gw * gh).map(() => rng.next());
+    const hf = new Float32Array(W * H);
+    const sm = (t) => t * t * (3 - 2 * t);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const fx = x / S, fy = y / S, ix = Math.floor(fx), iy = Math.floor(fy), tx = sm(fx - ix), ty = sm(fy - iy);
+      const a = g[iy * gw + ix], b = g[iy * gw + ix + 1], c = g[(iy + 1) * gw + ix], d = g[(iy + 1) * gw + ix + 1];
+      hf[y * W + x] = (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
+    }
+    this.hill = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const h0 = hf[Math.max(0, y - 1) * W + Math.max(0, x - 1)], h1 = hf[Math.min(H - 1, y + 1) * W + Math.min(W - 1, x + 1)];
+      this.hill[y * W + x] = clamp((h0 - h1) * 3.2, -1, 1);
+    }
   }
 
   resize() {
@@ -92,7 +118,7 @@ export class Renderer {
     for (let y = y0 - 1; y <= y0 + CHUNK; y++) for (let x = x0 - 1; x <= x0 + CHUNK; x++) {
       if (!m.inb(x, y)) continue;
       const t = tAt(x, y), v = m.variant[m.idx(x, y)];
-      const base = t === T.TREE ? T.GRASS : t === T.SPIRE ? T.DIRT : t;
+      const base = t === T.TREE ? T.GRASS : t === T.SPIRE || (t === T.ROCK && this.view3d) ? T.DIRT : t;
       ctx.fillStyle = TERRAIN_COL[base][v & 3];
       ctx.fillRect((x - x0) * TILE, (y - y0) * TILE, TILE, TILE);
     }
@@ -102,10 +128,28 @@ export class Renderer {
       const t = tAt(x, y);
       if (t === T.WATER) continue;
       const v = m.variant[m.idx(x, y)];
-      const base = t === T.TREE ? T.GRASS : t === T.SPIRE ? T.DIRT : t;
+      const base = t === T.TREE ? T.GRASS : t === T.SPIRE || (t === T.ROCK && this.view3d) ? T.DIRT : t;
       const px = (x - x0) * TILE, py = (y - y0) * TILE;
       ctx.fillStyle = TERRAIN_COL[base][(v >> 2) & 3];
       ctx.beginPath(); ctx.arc(px + TILE / 2, py + TILE / 2, TILE * 0.72, 0, TAU); ctx.fill();
+    }
+    // hill shading (light from the north-west)
+    if (this.view3d) {
+      for (let y = y0; y < y0 + CHUNK; y++) for (let x = x0; x < x0 + CHUNK; x++) {
+        if (!m.inb(x, y) || tAt(x, y) === T.WATER) continue;
+        const hs = this.hill[m.idx(x, y)];
+        if (Math.abs(hs) < 0.04) continue;
+        ctx.fillStyle = hs > 0 ? `rgba(255,244,210,${(hs * 0.16).toFixed(3)})` : `rgba(0,0,20,${(-hs * 0.22).toFixed(3)})`;
+        ctx.fillRect((x - x0) * TILE, (y - y0) * TILE, TILE, TILE);
+      }
+      // water depth: darker away from shore
+      for (let y = y0; y < y0 + CHUNK; y++) for (let x = x0; x < x0 + CHUNK; x++) {
+        if (!m.inb(x, y) || tAt(x, y) !== T.WATER) continue;
+        let shore = 0;
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (m.inb(x + dx, y + dy) && tAt(x + dx, y + dy) !== T.WATER) shore++;
+        if (!shore) { ctx.fillStyle = 'rgba(0,10,30,0.25)'; ctx.fillRect((x - x0) * TILE, (y - y0) * TILE, TILE, TILE); }
+        if (y > 0 && tAt(x, y - 1) !== T.WATER) { ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect((x - x0) * TILE, (y - y0) * TILE, TILE, 6); }
+      }
     }
     // shoreline foam
     ctx.strokeStyle = 'rgba(220,235,240,0.25)'; ctx.lineWidth = 2;
@@ -133,7 +177,20 @@ export class Renderer {
       const t = tAt(x, y), v = m.variant[m.idx(x, y)];
       const px = (x - x0) * TILE, py = (y - y0) * TILE;
       const r = new RNG(v * 104729 + x * 13 + y * 7);
-      if (t === T.ROCK) {
+      if (t === T.ROCK && this.view3d) {
+        this.cliffTile(ctx, m, x, y, px, py, r, tAt);
+      } else if (t === T.TREE && this.view3d) {
+        const n = 2 + (v & 1);
+        for (let k = 0; k < n; k++) {
+          const cx2 = px + 8 + r.next() * 16, cy2 = py + 10 + r.next() * 14, rad = 7 + r.next() * 5, ht = 9 + r.next() * 6;
+          ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(cx2 + ht * 0.7, cy2 + ht * 0.35, rad * 1.05, rad * 0.8, 0.5, 0, TAU); ctx.fill();
+          ctx.fillStyle = '#4a3420'; ctx.fillRect(cx2 - 1.5, cy2 - ht * 0.6, 3, ht * 0.6);
+          const g = ctx.createRadialGradient(cx2 - rad * 0.4, cy2 - ht - rad * 0.4, 1, cx2, cy2 - ht, rad * 1.1);
+          const base = shade('#2f5a22', (r.next() - 0.5) * 0.3);
+          g.addColorStop(0, '#7fae52'); g.addColorStop(0.45, base); g.addColorStop(1, '#16290f');
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx2, cy2 - ht, rad, 0, TAU); ctx.fill();
+        }
+      } else if (t === T.ROCK) {
         for (let k = 0; k < 3; k++) {
           const cx2 = px + 6 + r.next() * 20, cy2 = py + 6 + r.next() * 20, rad = 8 + r.next() * 8;
           ctx.fillStyle = 'rgba(0,0,0,0.25)';
@@ -161,6 +218,35 @@ export class Renderer {
         }
         crystal(ctx, px + 16, py + 14, 10, col);
       }
+    }
+  }
+
+  // Raised rocky plateau tile: lifted top surface + south-facing cliff wall + cast shadow.
+  cliffTile(ctx, m, x, y, px, py, r, tAt) {
+    const CH = 12;
+    const isR = (xx, yy) => !m.inb(xx, yy) || tAt(xx, yy) === T.ROCK;
+    const N = isR(x, y - 1), S = isR(x, y + 1), E = isR(x + 1, y), Wn = isR(x - 1, y);
+    const R = 9;
+    if (!S || !E) { ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(px + (E ? 0 : TILE), py + 4, E ? TILE : 8, TILE - 4); if (!S) ctx.fillRect(px + 4, py + TILE, TILE, 6); }
+    if (!S) {
+      const g = ctx.createLinearGradient(0, py + TILE - CH, 0, py + TILE);
+      g.addColorStop(0, '#5c564d'); g.addColorStop(1, '#2f2b26');
+      ctx.fillStyle = g;
+      roundRect(ctx, px, py + TILE - CH - R, TILE, CH + R, [0, 0, !E ? R : 0, !Wn ? R : 0]); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let k = 0; k < 4; k++) { const sx = px + 3 + r.next() * (TILE - 6); ctx.moveTo(sx, py + TILE - CH + 2); ctx.lineTo(sx + (r.next() - 0.5) * 3, py + TILE - 1); }
+      ctx.stroke();
+    }
+    const top = shade('#857e72', ((m.variant[m.idx(x, y)] & 7) - 3.5) * 0.02);
+    ctx.fillStyle = top;
+    roundRect(ctx, px, py - CH, TILE, TILE, [!N && !Wn ? R : 0, !N && !E ? R : 0, !S && !E ? R : 0, !S && !Wn ? R : 0]); ctx.fill();
+    if (!N) { ctx.fillStyle = 'rgba(255,250,230,0.18)'; ctx.fillRect(px + (Wn ? 0 : 4), py - CH, TILE - (Wn ? 0 : 4) - (E ? 0 : 4), 2); }
+    if (!Wn) { ctx.fillStyle = 'rgba(255,250,230,0.12)'; ctx.fillRect(px, py - CH + 4, 2, TILE - 8); }
+    for (let k = 0; k < 2; k++) {
+      const cx2 = px + 7 + r.next() * 18, cy2 = py - CH + 7 + r.next() * 18, rad = 4 + r.next() * 5;
+      ctx.fillStyle = 'rgba(0,0,0,0.18)'; poly(ctx, cx2 + 2, cy2 + 2, rad, r, 6);
+      ctx.fillStyle = shade('#9a9386', (r.next() - 0.5) * 0.2); poly(ctx, cx2, cy2, rad, r, 6);
     }
   }
 
@@ -306,17 +392,17 @@ export class Renderer {
       ctx.save(); ctx.translate((c.x + 0.5) * TILE, (c.y + 0.5) * TILE); drawCrate(ctx, this.time); ctx.restore();
     }
 
-    // buildings
+    // buildings and units, depth-sorted by their ground line so tall structures hide what is behind them
     const sel = ui.selection;
-    const bl = w.buildings.filter((b) => !b.dead && (b.tx + b.w) * TILE >= x0 - 40 && b.tx * TILE <= x1 + 40 && (b.ty + b.h) * TILE >= y0 - 40 && b.ty * TILE <= y1 + 40);
-    bl.sort((a, b) => a.y - b.y);
-    for (const b of bl) {
+    const items = [];
+    for (const b of w.buildings) {
+      if (b.dead || (b.tx + b.w) * TILE < x0 - 40 || b.tx * TILE > x1 + 40 || (b.ty + b.h) * TILE < y0 - 40 || b.ty * TILE > y1 + 80) continue;
       const mine = w.isAlly(b.owner, me);
       if (!mine && vis && !(b.seen & (1 << me))) continue;
-      const anyExplored = !vis || tileVis(b.tx + (b.w >> 1), b.ty + (b.h >> 1)) > 0;
-      if (!anyExplored) continue;
-      this.drawBuildingEnt(ctx, b);
+      if (vis && tileVis(b.tx + (b.w >> 1), b.ty + (b.h >> 1)) === 0) continue;
+      items.push({ k: (b.ty + b.h) * TILE - 0.5, b });
     }
+    if (this.view3d) for (const it of items) this.buildingShadow(ctx, it.b);
 
     // rally lines for selected
     for (const id of sel) {
@@ -327,18 +413,23 @@ export class Renderer {
       ctx.fillStyle = '#7cff7c'; ctx.beginPath(); ctx.moveTo(b.rally.x, b.rally.y); ctx.lineTo(b.rally.x, b.rally.y - 14); ctx.lineTo(b.rally.x + 9, b.rally.y - 10); ctx.lineTo(b.rally.x, b.rally.y - 7); ctx.fill();
     }
 
-    // units
-    const ul = w.units.filter((u) => !u.dead && u.x >= x0 - 40 && u.x <= x1 + 40 && u.y >= y0 - 40 && u.y <= y1 + 40);
-    ul.sort((a, b) => (UNITS[a.type].cat === 'infantry') - (UNITS[b.type].cat === 'infantry') || a.y - b.y);
-    for (const u of ul) {
+    for (const u of w.units) {
+      if (u.dead || u.x < x0 - 40 || u.x > x1 + 40 || u.y < y0 - 40 || u.y > y1 + 60) continue;
       if (!w.isAlly(u.owner, me) && vis && !w.visibleTo(me, u.x, u.y)) continue;
+      items.push({ k: u.y, u });
+    }
+    items.sort((a, b) => a.k - b.k);
+    for (const it of items) {
+      if (it.b) { this.drawBuildingEnt(ctx, it.b); continue; }
+      const u = it.u;
+      const lift = this.unitLift(u.type);
       const ix = lerp(u.px ?? u.x, u.x, alpha), iy = lerp(u.py ?? u.y, u.y, alpha);
       ctx.save(); ctx.translate(ix, iy);
       const col = w.players[u.owner].color;
       const firing = w.time - u.lastFire < 0.08;
-      if (UNITS[u.type].cat === 'infantry') drawInfantry(ctx, u.type, col, u.angle, this.time + u.id, u.moving, firing);
-      else drawVehicle(ctx, u.type, col, u.angle, u.tAngle, this.time + u.id, u.moving, firing, { cargo: u.cargo / (UNITS[u.type].capacity || 1), cargoKind: u.cargoKind, mining: u.order.type === 'harvest' && u.order.s === 'mine', barrel: u.barrel });
-      if (u.hitT && w.time - u.hitT < 0.06) { ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(0, 0, unitRadius(u.type), 0, TAU); ctx.fill(); }
+      if (UNITS[u.type].cat === 'infantry') drawInfantry(ctx, u.type, col, u.angle, this.time + u.id, u.moving, firing, lift);
+      else drawVehicle(ctx, u.type, col, u.angle, u.tAngle, this.time + u.id, u.moving, firing, { cargo: u.cargo / (UNITS[u.type].capacity || 1), cargoKind: u.cargoKind, mining: u.order.type === 'harvest' && u.order.s === 'mine', barrel: u.barrel, lift });
+      if (u.hitT && w.time - u.hitT < 0.06) { ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(0, -lift, unitRadius(u.type), 0, TAU); ctx.fill(); }
       ctx.restore();
       if (UNITS[u.type].cat !== 'infantry' && u.hp < u.maxHp * 0.5 && Math.random() < (u.hp < u.maxHp * 0.25 ? 0.25 : 0.08)) this.smoke(u.x, u.y, 1, 0.5);
     }
@@ -353,13 +444,17 @@ export class Renderer {
         ctx.fillStyle = '#ffd27a'; ctx.beginPath(); ctx.arc(pr.x, pr.y - h, 3, 0, TAU); ctx.fill();
       } else if (pr.kind === 'rocket') {
         const a = Math.atan2(pr.ty - pr.sy, pr.tx - pr.sx);
-        ctx.save(); ctx.translate(pr.x, pr.y); ctx.rotate(a);
+        const alt = this.view3d ? 8 : 0;
+        if (alt) { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.arc(pr.x + 4, pr.y + 3, 2.5, 0, TAU); ctx.fill(); }
+        ctx.save(); ctx.translate(pr.x, pr.y - alt); ctx.rotate(a);
         ctx.fillStyle = '#ddd'; ctx.fillRect(-4, -1.2, 8, 2.4);
         ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.arc(-5, 0, 2.5, 0, TAU); ctx.fill();
         ctx.restore();
         if (Math.random() < 0.6) this.particles.push({ x: pr.x, y: pr.y, vx: 0, vy: 0, life: 0.4, max: 0.4, size: 2, col: 'rgba(200,200,200,', grow: 6, smoke: true });
       } else {
-        ctx.fillStyle = '#ffe9a0'; ctx.beginPath(); ctx.arc(pr.x, pr.y, 2.2, 0, TAU); ctx.fill();
+        const alt = this.view3d ? 6 : 0;
+        if (alt) { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.arc(pr.x + 3, pr.y + 2, 2, 0, TAU); ctx.fill(); }
+        ctx.fillStyle = '#ffe9a0'; ctx.beginPath(); ctx.arc(pr.x, pr.y - alt, 2.2, 0, TAU); ctx.fill();
       }
     }
 
@@ -449,64 +544,111 @@ export class Renderer {
     }
   }
 
-  drawBuildingEnt(ctx, b) {
-    const w = this.world;
-    const d = BUILDINGS[b.type];
-    const col = w.players[b.owner].color;
-    const p = w.players[b.owner];
-    ctx.save();
-    ctx.translate(b.tx * TILE, b.ty * TILE);
-    if (b.built < 1) {
-      ctx.save();
-      const H = d.h * TILE;
-      ctx.beginPath(); ctx.rect(-4, H * (1 - b.built) - 2, d.w * TILE + 8, H * b.built + 6); ctx.clip();
-    }
+  buildingShadow(ctx, b) {
+    const H = this.bHeight(b.type) * Math.min(1, b.built);
+    if (H < 2) return;
+    const x0 = b.tx * TILE + 2, y0 = b.ty * TILE + 2, x1 = (b.tx + b.w) * TILE - 2, y1 = (b.ty + b.h) * TILE;
+    const dx = H * 0.75, dy = H * 0.45;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.moveTo(x0, y0 - H * 0.2); ctx.lineTo(x1, y0 - H * 0.2); ctx.lineTo(x1 + dx, y0 + dy); ctx.lineTo(x1 + dx, y1 + dy); ctx.lineTo(x0 + dx, y1 + dy); ctx.lineTo(x0, y1);
+    ctx.closePath(); ctx.fill();
+  }
+
+  buildingOpts(b) {
+    const w = this.world, d = BUILDINGS[b.type], p = w.players[b.owner];
     const opts = {
       unpowered: p.lowPower && (d.power < 0 || d.needsPower), tAngle: b.tAngle, firing: w.time - b.lastFire < 0.1,
       docking: b.dockBusy, repairing: b.repairFx && w.time - b.repairFx < 0.4,
     };
-    if (d.superweapon && b.owner === this.me) { opts.charge = p.sw.max ? p.sw.charge / p.sw.max : 0; opts.ready = p.sw.ready; }
-    else if (d.superweapon) { opts.charge = p.sw.max ? p.sw.charge / p.sw.max : 0; opts.ready = p.sw.ready; }
+    if (d.superweapon) { opts.charge = p.sw.max ? p.sw.charge / p.sw.max : 0; opts.ready = p.sw.ready; }
     if (d.wall) {
       const m = w.map;
       const same = (x, y) => { if (!m.inb(x, y)) return false; const o = w.get(m.bld[m.idx(x, y)]); return o && o.type === 'wall'; };
       opts.neighbors = { l: same(b.tx - 1, b.ty), r: same(b.tx + 1, b.ty), u: same(b.tx, b.ty - 1), d: same(b.tx, b.ty + 1) };
     }
-    drawBuilding(ctx, b.type, col, this.time + b.id * 0.37, opts);
-    if (b.built < 1) {
-      ctx.restore();
-      const H = d.h * TILE, y = H * (1 - b.built);
-      ctx.strokeStyle = '#e5c33a'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(d.w * TILE, y); ctx.stroke();
-      ctx.strokeStyle = 'rgba(229,195,58,0.5)'; ctx.lineWidth = 1;
-      ctx.strokeRect(1, 1, d.w * TILE - 2, H - 2);
-      this.spark(b.tx * TILE + Math.random() * d.w * TILE, b.ty * TILE + y, 1, '#ffe680');
+    return opts;
+  }
+
+  // Draw a structure as a raised block: south wall (facade) + roof lifted by its height.
+  drawStructure(ctx, type, color, t, opts, built = 1) {
+    const d = BUILDINGS[type];
+    const W = d.w * TILE, D = d.h * TILE;
+    const H = this.bHeight(type) * built;
+    if (!H) {
+      if (built < 1) { ctx.save(); ctx.beginPath(); ctx.rect(-4, D * (1 - built) - 2, W + 8, D * built + 6); ctx.clip(); }
+      drawBuilding(ctx, type, color, t, opts);
+      if (built < 1) ctx.restore();
+      return 0;
     }
+    if (!(d.wall && opts.neighbors && opts.neighbors.d)) drawFacade(ctx, type, color, W, D, H, t, opts);
+    ctx.save(); ctx.translate(0, -H);
+    drawBuilding(ctx, type, color, t, { ...opts, noShadow: true });
+    // light the roof from the north-west
+    const g = ctx.createLinearGradient(0, 0, W, D);
+    g.addColorStop(0, 'rgba(255,248,225,0.10)'); g.addColorStop(1, 'rgba(0,0,0,0.10)');
+    ctx.fillStyle = g; ctx.fillRect(1, 1, W - 2, D - 2);
+    ctx.restore();
+    return H;
+  }
+
+  drawBuildingEnt(ctx, b) {
+    const w = this.world;
+    const d = BUILDINGS[b.type];
+    const col = w.players[b.owner].color;
+    const p = w.players[b.owner];
+    const W = d.w * TILE, D = d.h * TILE;
+    ctx.save();
+    ctx.translate(b.tx * TILE, b.ty * TILE);
+    const built = Math.min(1, b.built);
+    const H = this.drawStructure(ctx, b.type, col, this.time + b.id * 0.37, this.buildingOpts(b), built);
+    if (built < 1) {
+      ctx.strokeStyle = '#e5c33a'; ctx.lineWidth = 2;
+      if (H) {
+        // scaffolding around the rising block
+        ctx.strokeStyle = 'rgba(229,195,58,0.85)'; ctx.lineWidth = 1.2;
+        const full = this.bHeight(b.type);
+        ctx.strokeRect(1, D - full - D, W - 2, D + full - 1);
+        ctx.beginPath();
+        for (let x = 1; x <= W; x += 10) { ctx.moveTo(x, D); ctx.lineTo(x, -full); }
+        ctx.stroke();
+        this.spark(b.tx * TILE + Math.random() * W, b.ty * TILE - H, 1, '#ffe680');
+      } else {
+        const y = D * (1 - built);
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        ctx.strokeStyle = 'rgba(229,195,58,0.5)'; ctx.lineWidth = 1;
+        ctx.strokeRect(1, 1, W - 2, D - 2);
+        this.spark(b.tx * TILE + Math.random() * W, b.ty * TILE + y, 1, '#ffe680');
+      }
+    }
+    ctx.translate(0, -H);
     if (b.demoT > 0) {
       ctx.fillStyle = Math.sin(w.time * 20) > 0 ? '#ff3030' : '#601010';
-      ctx.beginPath(); ctx.arc(d.w * TILE / 2, d.h * TILE / 2, 5, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(W / 2, D / 2, 5, 0, TAU); ctx.fill();
     }
     if (b.repairing) {
       ctx.globalAlpha = 0.6 + 0.4 * Math.sin(w.time * 8);
-      wrench(ctx, d.w * TILE / 2, d.h * TILE / 2);
+      wrench(ctx, W / 2, D / 2);
       ctx.globalAlpha = 1;
     }
     if (p.lowPower && d.power < 0 && b.owner === this.me && Math.sin(w.time * 4) > 0) {
-      ctx.fillStyle = '#ffdd00'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('⚡', d.w * TILE / 2, 14);
+      ctx.fillStyle = '#ffdd00'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('⚡', W / 2, 14);
     }
     ctx.restore();
-    if (b.hp < b.maxHp * 0.5 && !d.wall && Math.random() < 0.15) this.smoke(b.x + (Math.random() - 0.5) * d.w * 20, b.y + (Math.random() - 0.5) * d.h * 20, 1, 1);
-    if (b.hp < b.maxHp * 0.25 && !d.wall && Math.random() < 0.3) this.particles.push({ x: b.x + (Math.random() - 0.5) * d.w * 20, y: b.y + (Math.random() - 0.5) * d.h * 20, vx: 0, vy: -20, life: 0.4, max: 0.4, size: 3, col: '#ff8a2a', grow: 3, glow: true });
+    const ry = b.y - H;
+    if (b.hp < b.maxHp * 0.5 && !d.wall && Math.random() < 0.15) this.smoke(b.x + (Math.random() - 0.5) * d.w * 20, ry + (Math.random() - 0.5) * d.h * 20, 1, 1);
+    if (b.hp < b.maxHp * 0.25 && !d.wall && Math.random() < 0.3) this.particles.push({ x: b.x + (Math.random() - 0.5) * d.w * 20, y: ry + (Math.random() - 0.5) * d.h * 20, vx: 0, vy: -20, life: 0.4, max: 0.4, size: 3, col: '#ff8a2a', grow: 3, glow: true });
   }
 
   drawSelection(ctx, e, alpha, selected, ui) {
     const w = this.world, z = this.cam.zoom;
     let cx, cy, hw, hh;
     if (e.kind === 'unit') {
-      cx = lerp(e.px ?? e.x, e.x, alpha); cy = lerp(e.py ?? e.y, e.y, alpha);
+      cx = lerp(e.px ?? e.x, e.x, alpha); cy = lerp(e.py ?? e.y, e.y, alpha) - this.unitLift(e.type);
       hw = hh = unitRadius(e.type) + 3;
     } else {
-      cx = e.x; cy = e.y; hw = (e.w * TILE) / 2; hh = (e.h * TILE) / 2;
+      const H = this.bHeight(e.type) * Math.min(1, e.built);
+      cx = e.x; cy = e.y - H / 2; hw = (e.w * TILE) / 2; hh = (e.h * TILE + H) / 2;
     }
     const col = selected ? (w.isAlly(e.owner, this.me) ? '#ffffff' : '#ff8080') : 'rgba(255,255,255,0.5)';
     ctx.strokeStyle = col; ctx.lineWidth = 1.5 / z;
@@ -558,16 +700,16 @@ export class Renderer {
     const d = BUILDINGS[type];
     const [tx, ty] = ui.placeTile;
     const st = w.tileStatus(this.me, type, tx, ty);
-    ctx.globalAlpha = 0.55;
-    ctx.save(); ctx.translate(tx * TILE, ty * TILE);
-    drawBuilding(ctx, type, w.players[this.me].color, this.time, { tAngle: 0, neighbors: {} });
-    ctx.restore();
-    ctx.globalAlpha = 1;
     let k = 0;
     for (let y = ty; y < ty + d.h; y++) for (let x = tx; x < tx + d.w; x++) {
       ctx.fillStyle = st[k++] ? 'rgba(80,255,80,0.28)' : 'rgba(255,60,60,0.45)';
       ctx.fillRect(x * TILE + 1, y * TILE + 1, TILE - 2, TILE - 2);
     }
+    ctx.globalAlpha = 0.55;
+    ctx.save(); ctx.translate(tx * TILE, ty * TILE);
+    this.drawStructure(ctx, type, w.players[this.me].color, this.time, { tAngle: 0, neighbors: {} });
+    ctx.restore();
+    ctx.globalAlpha = 1;
     if (ui.wallLine && ui.wallLine.length) {
       for (const [x, y] of ui.wallLine) { ctx.fillStyle = 'rgba(80,255,80,0.25)'; ctx.fillRect(x * TILE + 2, y * TILE + 2, TILE - 4, TILE - 4); }
     }
@@ -681,6 +823,15 @@ export class Renderer {
   }
 }
 
+function roundRect(ctx, x, y, w, h, [tl, tr, br, bl]) {
+  ctx.beginPath();
+  ctx.moveTo(x + tl, y);
+  ctx.lineTo(x + w - tr, y); if (tr) ctx.quadraticCurveTo(x + w, y, x + w, y + tr);
+  ctx.lineTo(x + w, y + h - br); if (br) ctx.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+  ctx.lineTo(x + bl, y + h); if (bl) ctx.quadraticCurveTo(x, y + h, x, y + h - bl);
+  ctx.lineTo(x, y + tl); if (tl) ctx.quadraticCurveTo(x, y, x + tl, y);
+  ctx.closePath();
+}
 function poly(ctx, cx, cy, r, rng, n) {
   ctx.beginPath();
   for (let k = 0; k < n; k++) {

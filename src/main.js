@@ -15,7 +15,7 @@ const SAVE_KEY = 'ironmeridian.save';
 const SET_KEY = 'ironmeridian.settings';
 const SETUP_KEY = 'ironmeridian.setup';
 
-const defaults = { sfx: 0.7, music: 0.45, voice: true, unitVoices: false, edgeScroll: true, scrollSpeed: 1, mouseScheme: 'classic', ui: 1, showFps: false };
+const defaults = { sfx: 0.7, music: 0.45, voice: true, unitVoices: false, edgeScroll: true, scrollSpeed: 1, mouseScheme: 'classic', ui: 1, showFps: false, view3d: true };
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SET_KEY) || '{}')); } catch { /* ignore */ }
 const saveSettings = () => { try { localStorage.setItem(SET_KEY, JSON.stringify(settings)); } catch { /* ignore */ } };
@@ -58,6 +58,8 @@ function bindSettings() {
   bind('#set-voice', 'voice', 'checked'); bind('#set-unitvoices', 'unitVoices', 'checked');
   bind('#set-edge', 'edgeScroll', 'checked'); bind('#set-scroll', 'scrollSpeed', 'value', Number);
   bind('#set-mouse', 'mouseScheme'); bind('#set-ui', 'ui', 'value', Number); bind('#set-fps', 'showFps', 'checked');
+  bind('#set-3d', 'view3d', 'checked');
+  $('#set-3d').addEventListener('change', () => { if (game.renderer) game.renderer.setView3d(settings.view3d); });
 }
 function applyUiScale() {
   document.documentElement.style.setProperty('--ui', settings.ui);
@@ -194,6 +196,7 @@ function startGame(world) {
   $('#game').hidden = false;
   document.body.classList.add('in-game');
   game.renderer = new Renderer(game.canvas, world, game.me);
+  game.renderer.setView3d(settings.view3d);
   if (game.controller) game.controller.unbind();
   game.controller = new Controller(game);
   game.ui = new UI(game);

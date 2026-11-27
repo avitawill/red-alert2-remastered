@@ -1,5 +1,5 @@
 // Offline cache for Iron Meridian.
-const CACHE = 'ironmeridian-v1';
+const CACHE = 'ironmeridian-v2';
 const ASSETS = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'src/main.js', 'src/config.js', 'src/util.js', 'src/map.js', 'src/path.js', 'src/world.js', 'src/ai.js',

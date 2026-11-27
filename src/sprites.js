@@ -26,15 +26,16 @@ function box(ctx, x, y, w, h, fill, stroke, r = 0, lw = 1) {
 
 // ---------------- Units ----------------
 // Drawn centered at origin, facing +x (angle applied by caller for vehicles).
-export function drawInfantry(ctx, type, color, angle, t, moving, firing) {
+export function drawInfantry(ctx, type, color, angle, t, moving, firing, lift = 0) {
   const dark = shade(color, -0.45);
   const step = moving ? Math.sin(t * 14) * 2 : 0;
   const big = type === 'juggernaut';
   const R = big ? 6.5 : 4.2;
   // shadow
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath(); ctx.ellipse(1.5, 2.5, R + 1, R * 0.7, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(1.5 + lift * 0.6, 2.5 + lift * 0.3, R + 1, R * 0.7, 0, 0, TAU); ctx.fill();
   ctx.save();
+  ctx.translate(0, -lift);
   ctx.rotate(angle);
   // legs
   ctx.fillStyle = dark;
@@ -84,12 +85,28 @@ function tracks(ctx, L, W, tw, t, moving) {
 
 export function drawVehicle(ctx, type, color, angle, tAngle, t, moving, firing, extra = {}) {
   const dark = shade(color, -0.5), mid = shade(color, -0.2), light = shade(color, 0.25);
-  // shadow
-  ctx.save();
-  ctx.rotate(angle);
-  ctx.fillStyle = 'rgba(0,0,0,0.32)';
   const sz = { raider: [20, 14], tank: [26, 20], artillery: [26, 18], lancer: [26, 20], behemoth: [32, 26], harvester: [32, 24], crawler: [34, 26] }[type] || [24, 18];
-  rr(ctx, -sz[0] / 2 + 3, -sz[1] / 2 + 3, sz[0], sz[1], 4); ctx.fill();
+  const lift = extra.lift || 0;
+  ctx.save();
+  if (lift) {
+    // ground shadow cast away from the sun (top-left), then the hull's side wall, then raise the body
+    ctx.save(); ctx.translate(lift * 1.3 + 1, lift * 0.9 + 1); ctx.rotate(angle);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; rr(ctx, -sz[0] / 2, -sz[1] / 2, sz[0], sz[1], 5); ctx.fill();
+    ctx.restore();
+    ctx.save(); ctx.rotate(angle);
+    ctx.fillStyle = '#141412'; rr(ctx, -sz[0] / 2 + 0.5, -sz[1] / 2 + 0.5, sz[0] - 1, sz[1] - 1, 4); ctx.fill();
+    ctx.restore();
+    ctx.translate(0, -lift);
+    ctx.rotate(angle);
+  } else {
+    ctx.rotate(angle);
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    rr(ctx, -sz[0] / 2 + 3, -sz[1] / 2 + 3, sz[0], sz[1], 4); ctx.fill();
+  }
+  // turret sits higher than the hull: shift "screen-up" expressed in the rotated frame
+  const te = lift ? 2.5 : 0;
+  const tlx = -te * Math.sin(angle), tly = -te * Math.cos(angle);
+  const turretBase = (r) => { if (te) circle(ctx, 0, 0, r, 'rgba(0,0,0,0.35)'); ctx.translate(tlx, tly); };
   const ta = tAngle - angle;
   const recoil = firing ? -2 : 0;
   switch (type) {
@@ -98,7 +115,7 @@ export function drawVehicle(ctx, type, color, angle, tAngle, t, moving, firing, 
       box(ctx, -9, -5.5, 18, 11, color, dark, 3, 1.2);
       box(ctx, 2, -4, 4, 8, '#9fd3e8', '#333', 1);
       box(ctx, -8, -4, 6, 8, mid, null, 1);
-      ctx.save(); ctx.translate(-3, 0); ctx.rotate(ta);
+      ctx.save(); ctx.translate(-3, 0); turretBase(3.5); ctx.rotate(ta);
       circle(ctx, 0, 0, 3, '#444', '#111');
       box(ctx, 0 + recoil * 0.5, -0.8, 9, 1.6, '#1a1a1a');
       if (firing) circle(ctx, 10, 0, 2.2, '#fff0a0');
@@ -109,7 +126,7 @@ export function drawVehicle(ctx, type, color, angle, tAngle, t, moving, firing, 
       tracks(ctx, 24, 18, 5, t, moving);
       box(ctx, -10, -6.5, 20, 13, color, dark, 2, 1.2);
       box(ctx, -9, -5, 4, 10, mid);
-      ctx.save(); ctx.rotate(ta);
+      ctx.save(); turretBase(6.5); ctx.rotate(ta);
       if (type === 'tank') {
         box(ctx, 2 + recoil, -1.3, 12, 2.6, '#2c2c2c', '#111', 0.5);
         circle(ctx, 0, 0, 5.8, light, dark, 1.2);
@@ -138,7 +155,7 @@ export function drawVehicle(ctx, type, color, angle, tAngle, t, moving, firing, 
       box(ctx, -13, -8.5, 26, 17, color, dark, 3, 1.4);
       box(ctx, -12, -6, 5, 12, mid);
       box(ctx, 8, -8, 4, 16, shade(color, -0.3));
-      ctx.save(); ctx.rotate(ta);
+      ctx.save(); turretBase(8); ctx.rotate(ta);
       box(ctx, 3 + recoil, -5, 15, 3, '#2a2a2a', '#111', 0.5);
       box(ctx, 3 + recoil, 2, 15, 3, '#2a2a2a', '#111', 0.5);
       box(ctx, -7, -7, 13, 14, light, dark, 4, 1.4);
@@ -181,6 +198,71 @@ export function drawVehicle(ctx, type, color, angle, tAngle, t, moving, firing, 
 }
 
 // ---------------- Buildings ----------------
+// Wall height (world px) of each structure in the 2.5D view.
+export const BUILDING_HEIGHT = {
+  hq: 30, power: 24, refinery: 26, barracks: 16, factory: 28, radar: 20, depot: 3, techlab: 28,
+  orbital: 22, silo: 10, wall: 14, sentry: 10, turret: 12, lancetower: 30, bastion: 14, derrick: 14,
+};
+
+// Front (south-facing) wall of a raised structure. Spans y = D - H .. D in a footprint W wide.
+export function drawFacade(ctx, type, color, W, D, H, t, opts = {}) {
+  if (H <= 0.5) return;
+  const y = D - H;
+  const wall = type === 'wall';
+  const lit = !opts.unpowered;
+  const g = ctx.createLinearGradient(0, y, 0, D);
+  g.addColorStop(0, wall ? '#8f8f83' : '#707068');
+  g.addColorStop(1, wall ? '#5c5c53' : '#3f3f3a');
+  ctx.fillStyle = g;
+  if (wall) {
+    const n = opts.neighbors || {};
+    const x0 = n.l ? 0 : 5, x1 = n.r ? W : W - 5;
+    ctx.fillRect(x0, y - 5, x1 - x0, H);
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x0, y + H / 2 - 5); ctx.lineTo(x1, y + H / 2 - 5); ctx.stroke();
+    return;
+  }
+  ctx.fillRect(1, y, W - 2, H);
+  ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fillRect(1, y, W - 2, 1.5);
+  if (H > 9) { ctx.fillStyle = shade(color, -0.3); ctx.fillRect(1, y + 3, W - 2, 2.5); }
+  const win = (yy, step = 10) => {
+    for (let x = 6; x < W - 9; x += step) {
+      ctx.fillStyle = lit && ((x * 7 + yy) % 3) ? '#ffe08a' : '#262b31';
+      ctx.fillRect(x, yy, 5, 3.5);
+    }
+  };
+  const hazard = (x, yy, w, h) => {
+    ctx.save(); ctx.beginPath(); ctx.rect(x, yy, w, h); ctx.clip();
+    ctx.fillStyle = '#e5c33a'; ctx.fillRect(x, yy, w, h);
+    ctx.fillStyle = '#222';
+    for (let k = -h; k < w; k += 7) { ctx.beginPath(); ctx.moveTo(x + k, yy + h); ctx.lineTo(x + k + 3.5, yy + h); ctx.lineTo(x + k + 3.5 + h, yy); ctx.lineTo(x + k + h, yy); ctx.fill(); }
+    ctx.restore();
+  };
+  switch (type) {
+    case 'hq': win(y + 9); ctx.fillStyle = '#1b1f24'; ctx.fillRect(W / 2 - 8, D - 13, 16, 13); hazard(W / 2 - 8, D - 15, 16, 3); break;
+    case 'factory': {
+      const dh = Math.min(H - 6, 22);
+      ctx.fillStyle = '#1b1d20'; ctx.fillRect(W / 2 - 22, D - dh, 44, dh);
+      ctx.strokeStyle = '#33373c'; ctx.lineWidth = 1;
+      for (let yy = D - dh + 3; yy < D; yy += 3) { ctx.beginPath(); ctx.moveTo(W / 2 - 22, yy); ctx.lineTo(W / 2 + 22, yy); ctx.stroke(); }
+      hazard(W / 2 - 22, D - dh - 3, 44, 3);
+      break;
+    }
+    case 'barracks': ctx.fillStyle = '#1b1f24'; ctx.fillRect(W / 2 - 5, D - Math.min(H - 5, 10), 10, Math.min(H - 5, 10)); break;
+    case 'refinery': case 'power':
+      ctx.strokeStyle = '#8b8b82'; ctx.lineWidth = 2.5;
+      for (let x = 10; x < W - 6; x += 14) { ctx.beginPath(); ctx.moveTo(x, y + 6); ctx.lineTo(x, D - 2); ctx.stroke(); }
+      if (type === 'power') { ctx.fillStyle = lit ? '#ffe680' : '#333'; ctx.fillRect(W - 14, y + 8, 8, 4); }
+      break;
+    case 'techlab': ctx.fillStyle = lit ? 'rgba(150,210,255,0.75)' : '#3a4048'; ctx.fillRect(6, y + 8, W - 12, Math.max(3, H - 14)); break;
+    case 'radar': win(y + 8, 12); break;
+    case 'orbital': case 'silo': hazard(1, D - 5, W - 2, 4); break;
+    case 'lancetower': ctx.fillStyle = lit ? color : '#444'; ctx.fillRect(W / 2 - 2, y + 6, 4, H - 10); break;
+    case 'derrick': ctx.fillStyle = '#5b4f3c'; ctx.fillRect(1, y, W - 2, H); break;
+  }
+  // contact shadow at the base
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(1, D - 2, W - 2, 2);
+}
 // Drawn with top-left at (0,0) in a w*TILE by h*TILE box.
 export function drawBuilding(ctx, type, color, t, opts = {}) {
   const d = BUILDINGS[type];
@@ -189,9 +271,7 @@ export function drawBuilding(ctx, type, color, t, opts = {}) {
   const lit = !opts.unpowered;
   const glow = lit ? color : '#444';
   const conc = '#8a8a80', concD = '#5d5d55';
-  // shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillRect(5, 5, W - 2, H - 2);
+  if (!opts.noShadow) { ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(5, 5, W - 2, H - 2); }
   const slab = (inset = 1) => box(ctx, inset, inset, W - inset * 2, H - inset * 2, conc, concD, 2, 1.2);
   switch (type) {
     case 'hq': {
